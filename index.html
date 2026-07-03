@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <title>Routine</title>
-<meta name="description" content="Suivi quotidien de routines et habitudes" />
+<meta name="description" content="Routines, tâches et notes au quotidien" />
 
 <!-- PWA / iOS home screen -->
 <meta name="theme-color" content="#0b0d12" />
@@ -24,31 +24,75 @@
     <div class="header-top">
       <div>
         <div class="today-label" id="todayLabel"></div>
-        <h1>Routines</h1>
+        <h1 id="viewTitle">Routines</h1>
       </div>
-      <div class="ring" id="progressRing">
-        <svg viewBox="0 0 44 44">
-          <circle class="ring-track" cx="22" cy="22" r="19"></circle>
-          <circle class="ring-fill" id="ringFill" cx="22" cy="22" r="19"></circle>
-        </svg>
-        <span class="ring-text" id="ringText">0/0</span>
+      <div class="header-actions">
+        <div class="ring" id="progressRing">
+          <svg viewBox="0 0 44 44">
+            <circle class="ring-track" cx="22" cy="22" r="19"></circle>
+            <circle class="ring-fill" id="ringFill" cx="22" cy="22" r="19"></circle>
+          </svg>
+          <span class="ring-text" id="ringText">0/0</span>
+        </div>
+        <button class="icon-btn" id="settingsBtn" aria-label="Réglages">⚙️</button>
       </div>
     </div>
   </header>
 
   <main>
-    <ul class="routine-list" id="routineList"></ul>
+    <section class="view active" id="view-routines">
+      <div class="routine-groups" id="routineGroups"></div>
+      <div class="empty-state" id="emptyRoutines">
+        <p>Aucune routine pour l'instant.</p>
+        <p class="empty-sub">Appuie sur + pour ajouter ta première routine.</p>
+      </div>
+    </section>
 
-    <div class="empty-state" id="emptyState">
-      <p>Aucune routine pour l'instant.</p>
-      <p class="empty-sub">Appuie sur + pour ajouter ta première routine.</p>
-    </div>
+    <section class="view" id="view-tasks">
+      <ul class="task-list" id="taskList"></ul>
+      <div class="empty-state" id="emptyTasks">
+        <p>Aucune tâche.</p>
+        <p class="empty-sub">Appuie sur + pour ajouter une tâche ponctuelle.</p>
+      </div>
+    </section>
+
+    <section class="view" id="view-notes">
+      <div class="note-grid" id="noteGrid"></div>
+      <div class="empty-state" id="emptyNotes">
+        <p>Aucune note.</p>
+        <p class="empty-sub">Appuie sur + pour capturer une idée.</p>
+      </div>
+    </section>
+
+    <section class="view" id="view-stats">
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="heatmap-card">
+        <div class="heatmap-title">Activité — 12 dernières semaines</div>
+        <div class="heatmap" id="heatmap"></div>
+        <div class="heatmap-legend">
+          <span>Moins</span>
+          <span class="hm-cell hm-0"></span>
+          <span class="hm-cell hm-1"></span>
+          <span class="hm-cell hm-2"></span>
+          <span class="hm-cell hm-3"></span>
+          <span class="hm-cell hm-4"></span>
+          <span>Plus</span>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <button class="fab" id="addBtn" aria-label="Ajouter une routine">+</button>
+  <button class="fab" id="addBtn" aria-label="Ajouter">+</button>
+
+  <nav class="tabbar">
+    <button class="tab-btn active" data-view="routines"><span class="tab-icon">📋</span><span>Routines</span></button>
+    <button class="tab-btn" data-view="tasks"><span class="tab-icon">✅</span><span>Tâches</span></button>
+    <button class="tab-btn" data-view="notes"><span class="tab-icon">📝</span><span>Notes</span></button>
+    <button class="tab-btn" data-view="stats"><span class="tab-icon">📊</span><span>Stats</span></button>
+  </nav>
 </div>
 
-<!-- Add / edit modal -->
+<!-- Add / edit routine modal -->
 <div class="sheet-backdrop" id="sheetBackdrop">
   <div class="sheet" id="sheet">
     <div class="sheet-handle"></div>
@@ -58,10 +102,73 @@
 
     <input type="text" id="routineNameInput" placeholder="Nom de la routine" maxlength="40" autocomplete="off" />
 
+    <div class="moment-row" id="momentRow">
+      <button class="moment-btn" data-moment="morning">🌅 Matin</button>
+      <button class="moment-btn" data-moment="afternoon">☀️ Après-midi</button>
+      <button class="moment-btn" data-moment="evening">🌙 Soir</button>
+      <button class="moment-btn" data-moment="anytime">⏰ Quand tu veux</button>
+    </div>
+
+    <textarea id="routineNoteInput" placeholder="Note (optionnel)" maxlength="200" rows="2"></textarea>
+
     <div class="sheet-actions">
       <button class="btn btn-danger hidden" id="deleteBtn">Supprimer</button>
       <button class="btn btn-secondary" id="cancelBtn">Annuler</button>
       <button class="btn btn-primary" id="saveBtn">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add / edit task modal -->
+<div class="sheet-backdrop" id="taskSheetBackdrop">
+  <div class="sheet" id="taskSheet">
+    <div class="sheet-handle"></div>
+    <h2 id="taskSheetTitle">Nouvelle tâche</h2>
+
+    <input type="text" id="taskTextInput" placeholder="Que faut-il faire ?" maxlength="120" autocomplete="off" />
+    <input type="date" id="taskDueInput" />
+
+    <div class="sheet-actions">
+      <button class="btn btn-danger hidden" id="taskDeleteBtn">Supprimer</button>
+      <button class="btn btn-secondary" id="taskCancelBtn">Annuler</button>
+      <button class="btn btn-primary" id="taskSaveBtn">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add / edit note modal -->
+<div class="sheet-backdrop" id="noteSheetBackdrop">
+  <div class="sheet" id="noteSheet">
+    <div class="sheet-handle"></div>
+    <h2 id="noteSheetTitle">Nouvelle note</h2>
+
+    <textarea id="noteTextInput" placeholder="Écris ce que tu as en tête..." maxlength="2000" rows="6"></textarea>
+
+    <div class="sheet-actions">
+      <button class="btn btn-danger hidden" id="noteDeleteBtn">Supprimer</button>
+      <button class="btn btn-secondary" id="noteCancelBtn">Annuler</button>
+      <button class="btn btn-primary" id="noteSaveBtn">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings / backup modal -->
+<div class="sheet-backdrop" id="settingsSheetBackdrop">
+  <div class="sheet" id="settingsSheet">
+    <div class="sheet-handle"></div>
+    <h2>Réglages</h2>
+
+    <p class="settings-hint">Tes données restent uniquement sur cet iPhone. Exporte une sauvegarde régulièrement pour ne rien perdre.</p>
+
+    <div class="settings-actions">
+      <button class="btn btn-secondary" id="exportBtn">Exporter une sauvegarde</button>
+      <button class="btn btn-secondary" id="importBtn">Importer une sauvegarde</button>
+      <input type="file" id="importFile" accept="application/json" class="hidden" />
+      <button class="btn btn-danger" id="clearAllBtn">Tout effacer</button>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" id="settingsCloseBtn">Fermer</button>
     </div>
   </div>
 </div>
