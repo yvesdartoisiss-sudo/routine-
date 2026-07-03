@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Routine</title>
+<meta name="description" content="Suivi quotidien de routines et habitudes" />
+
+<!-- PWA / iOS home screen -->
+<meta name="theme-color" content="#0b0d12" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Routine" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/icon-192.png" />
+
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="app-header">
+    <div class="header-top">
+      <div>
+        <div class="today-label" id="todayLabel"></div>
+        <h1>Routines</h1>
+      </div>
+      <div class="ring" id="progressRing">
+        <svg viewBox="0 0 44 44">
+          <circle class="ring-track" cx="22" cy="22" r="19"></circle>
+          <circle class="ring-fill" id="ringFill" cx="22" cy="22" r="19"></circle>
+        </svg>
+        <span class="ring-text" id="ringText">0/0</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <ul class="routine-list" id="routineList"></ul>
+
+    <div class="empty-state" id="emptyState">
+      <p>Aucune routine pour l'instant.</p>
+      <p class="empty-sub">Appuie sur + pour ajouter ta première routine.</p>
+    </div>
+  </main>
+
+  <button class="fab" id="addBtn" aria-label="Ajouter une routine">+</button>
+</div>
+
+<!-- Add / edit modal -->
+<div class="sheet-backdrop" id="sheetBackdrop">
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="sheetTitle">Nouvelle routine</h2>
+
+    <div class="emoji-row" id="emojiRow"></div>
+
+    <input type="text" id="routineNameInput" placeholder="Nom de la routine" maxlength="40" autocomplete="off" />
+
+    <div class="sheet-actions">
+      <button class="btn btn-danger hidden" id="deleteBtn">Supprimer</button>
+      <button class="btn btn-secondary" id="cancelBtn">Annuler</button>
+      <button class="btn btn-primary" id="saveBtn">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
