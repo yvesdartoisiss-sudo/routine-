@@ -78,6 +78,33 @@ body {
   gap: 10px;
 }
 
+.reminder-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--card));
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reminder-banner.hidden {
+  display: none;
+}
+
+.reminder-banner button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .icon-btn {
   width: 40px;
   height: 40px;
@@ -573,6 +600,91 @@ main {
 .moment-btn.selected {
   border-color: var(--accent);
   color: var(--accent-strong);
+}
+
+.note-type-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.note-type-btn {
+  flex: 1;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 2px solid var(--card-border);
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.note-type-btn.selected {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.voice-recorder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0 8px;
+}
+
+.record-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  font-size: 28px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+}
+
+.record-btn.recording {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.5); }
+  50% { box-shadow: 0 0 0 14px rgba(248,113,113,0); }
+}
+
+.record-timer {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-hint {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.voice-preview {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.note-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.note-audio-row audio {
+  flex: 1;
+  height: 32px;
+}
+
+.settings-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: -4px 0 4px;
 }
 
 #routineNameInput,

@@ -1,6 +1,7 @@
 (() => {
   const STORAGE_KEY = 'routine-app-data-v2';
   const OLD_STORAGE_KEY = 'routine-app-data-v1';
+  const LAST_NOTIFIED_KEY = 'routine-last-notified-date';
   const EMOJIS = ['✅', '💧', '🏃', '📚', '🧘', '🛌', '🍎', '💊', '✍️', '🧹', '🎯', '🌞'];
   const MOMENTS = [
     { key: 'morning', label: '🌅 Matin' },
@@ -19,6 +20,10 @@
     settingsBtn: document.getElementById('settingsBtn'),
     addBtn: document.getElementById('addBtn'),
     tabBtns: [...document.querySelectorAll('.tab-btn')],
+
+    reminderBanner: document.getElementById('reminderBanner'),
+    reminderText: document.getElementById('reminderText'),
+    reminderDismiss: document.getElementById('reminderDismiss'),
 
     routineGroups: document.getElementById('routineGroups'),
     emptyRoutines: document.getElementById('emptyRoutines'),
@@ -49,13 +54,21 @@
 
     noteSheetBackdrop: document.getElementById('noteSheetBackdrop'),
     noteSheetTitle: document.getElementById('noteSheetTitle'),
+    noteTypeRow: document.getElementById('noteTypeRow'),
     noteTextInput: document.getElementById('noteTextInput'),
+    voiceRecorder: document.getElementById('voiceRecorder'),
+    recordBtn: document.getElementById('recordBtn'),
+    recordTimer: document.getElementById('recordTimer'),
+    recordHint: document.getElementById('recordHint'),
+    voicePreview: document.getElementById('voicePreview'),
     noteSaveBtn: document.getElementById('noteSaveBtn'),
     noteCancelBtn: document.getElementById('noteCancelBtn'),
     noteDeleteBtn: document.getElementById('noteDeleteBtn'),
 
     settingsSheetBackdrop: document.getElementById('settingsSheetBackdrop'),
     settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+    notifBtn: document.getElementById('notifBtn'),
+    notifStatus: document.getElementById('notifStatus'),
     exportBtn: document.getElementById('exportBtn'),
     importBtn: document.getElementById('importBtn'),
     importFile: document.getElementById('importFile'),
@@ -69,6 +82,9 @@
   let selectedMoment = 'anytime';
   let editingTaskId = null;
   let editingNoteId = null;
+  let selectedNoteType = 'text';
+  let recordedBlob = null;
+  let pendingAudioId = null;
 
   function genId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -129,6 +145,128 @@
     return d.innerHTML;
   }
 
+  // ---------- Audio storage (IndexedDB) ----------
+
+  const AUDIO_DB_NAME = 'routine-audio-db';
+  const AUDIO_STORE = 'clips';
+
+  function openAudioDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(AUDIO_DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(AUDIO_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function audioPut(id, blob) {
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, 'readwrite');
+      tx.objectStore(AUDIO_STORE).put(blob, id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function audioGet(id) {
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, 'readonly');
+      const req = tx.objectStore(AUDIO_STORE).get(id);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function audioDelete(id) {
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, 'readwrite');
+      tx.objectStore(AUDIO_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---------- Voice recording ----------
+
+  let mediaRecorder = null;
+  let recordingChunks = [];
+  let recordingStream = null;
+  let recordingStartedAt = 0;
+  let recordingTimerHandle = null;
+
+  function formatTimer(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  async function startRecording() {
+    try {
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      alert("Impossible d'accéder au micro. Vérifie les autorisations dans les réglages de Safari.");
+      return;
+    }
+    recordingChunks = [];
+    const mimeType = ['audio/mp4', 'audio/webm']
+      .find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+    mediaRecorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined);
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size) recordingChunks.push(e.data); };
+    mediaRecorder.start();
+    recordingStartedAt = Date.now();
+    el.recordBtn.classList.add('recording');
+    el.recordBtn.textContent = '⏹️';
+    el.recordHint.textContent = 'Enregistrement en cours…';
+    recordingTimerHandle = setInterval(() => {
+      el.recordTimer.textContent = formatTimer((Date.now() - recordingStartedAt) / 1000);
+    }, 200);
+  }
+
+  function stopRecording() {
+    return new Promise((resolve) => {
+      if (!mediaRecorder) return resolve(null);
+      mediaRecorder.onstop = () => {
+        recordingStream.getTracks().forEach(t => t.stop());
+        clearInterval(recordingTimerHandle);
+        const blob = new Blob(recordingChunks, { type: mediaRecorder.mimeType || 'audio/mp4' });
+        resolve(blob);
+      };
+      mediaRecorder.stop();
+    });
+  }
+
+  el.recordBtn.addEventListener('click', async () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      const blob = await stopRecording();
+      el.recordBtn.classList.remove('recording');
+      el.recordBtn.textContent = '🎙️';
+      el.recordHint.textContent = 'Appuie pour ré-enregistrer';
+      if (blob && blob.size) {
+        recordedBlob = blob;
+        el.voicePreview.src = URL.createObjectURL(blob);
+        el.voicePreview.classList.remove('hidden');
+      }
+    } else {
+      el.voicePreview.classList.add('hidden');
+      el.recordTimer.textContent = '00:00';
+      startRecording();
+    }
+  });
+
+  function resetRecorderUI() {
+    recordedBlob = null;
+    pendingAudioId = null;
+    el.recordBtn.classList.remove('recording');
+    el.recordBtn.textContent = '🎙️';
+    el.recordHint.textContent = 'Appuie pour enregistrer';
+    el.recordTimer.textContent = '00:00';
+    el.voicePreview.classList.add('hidden');
+    el.voicePreview.removeAttribute('src');
+  }
+
   // ---------- Routines ----------
 
   function isDoneToday(r) {
@@ -157,6 +295,7 @@
     save();
     renderRoutines();
     renderStats();
+    renderReminderBanner();
   }
 
   function renderRoutines() {
@@ -296,6 +435,7 @@
     save();
     renderRoutines();
     renderStats();
+    renderReminderBanner();
     closeSheet(el.sheetBackdrop);
   }
 
@@ -304,6 +444,7 @@
     save();
     renderRoutines();
     renderStats();
+    renderReminderBanner();
     closeSheet(el.sheetBackdrop);
   }
 
@@ -324,12 +465,13 @@
     el.emptyTasks.classList.toggle('visible', tasks.length === 0);
 
     for (const t of tasks) {
+      const overdue = !t.done && t.dueDate && t.dueDate < todayKey();
       const li = document.createElement('li');
       li.className = 'task-item' + (t.done ? ' done' : '');
       li.innerHTML = `
         <div class="task-info">
           <div class="task-text">${escapeHtml(t.text)}</div>
-          ${t.dueDate ? `<div class="task-due">📅 ${formatDateShort(t.dueDate)}</div>` : ''}
+          ${t.dueDate ? `<div class="task-due" style="${overdue ? 'color:var(--danger)' : ''}">📅 ${formatDateShort(t.dueDate)}${overdue ? ' · en retard' : ''}</div>` : ''}
         </div>
         <button class="check" aria-label="Marquer comme fait">
           <svg viewBox="0 0 24 24" fill="none"><path d="M4 12l5 5L20 6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -341,6 +483,7 @@
         save();
         renderTasks();
         renderStats();
+        renderReminderBanner();
       });
       li.querySelector('.task-info').addEventListener('click', () => openTaskEdit(t));
       el.taskList.appendChild(li);
@@ -394,6 +537,7 @@
     save();
     renderTasks();
     renderStats();
+    renderReminderBanner();
     closeSheet(el.taskSheetBackdrop);
   }
 
@@ -402,6 +546,7 @@
     save();
     renderTasks();
     renderStats();
+    renderReminderBanner();
     closeSheet(el.taskSheetBackdrop);
   }
 
@@ -412,8 +557,13 @@
 
   // ---------- Notes ----------
 
+  const noteAudioUrls = new Map();
+
   function renderNotes() {
     const notes = [...data.notes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    for (const url of noteAudioUrls.values()) URL.revokeObjectURL(url);
+    noteAudioUrls.clear();
 
     el.noteGrid.innerHTML = '';
     el.emptyNotes.classList.toggle('visible', notes.length === 0);
@@ -422,51 +572,137 @@
       const card = document.createElement('div');
       card.className = 'note-card';
       const d = new Date(n.updatedAt);
-      card.innerHTML = `
-        <div class="note-text">${escapeHtml(n.text)}</div>
-        <div class="note-date">${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-      `;
-      card.addEventListener('click', () => openNoteEdit(n));
+      const dateStr = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+      if (n.type === 'voice') {
+        card.innerHTML = `
+          <div class="note-audio-row">
+            <span>🎙️ ${formatTimer(n.duration || 0)}</span>
+            <audio controls></audio>
+          </div>
+          ${n.text ? `<div class="note-text" style="margin-top:8px;">${escapeHtml(n.text)}</div>` : ''}
+          <div class="note-date">${dateStr}</div>
+        `;
+        audioGet(n.audioId).then((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          noteAudioUrls.set(n.id, url);
+          const audioEl = card.querySelector('audio');
+          if (audioEl) audioEl.src = url;
+        });
+      } else {
+        card.innerHTML = `
+          <div class="note-text">${escapeHtml(n.text)}</div>
+          <div class="note-date">${dateStr}</div>
+        `;
+      }
+      card.addEventListener('click', (e) => {
+        if (e.target.tagName === 'AUDIO') return;
+        openNoteEdit(n);
+      });
       el.noteGrid.appendChild(card);
     }
   }
+
+  function setNoteType(type) {
+    selectedNoteType = type;
+    [...el.noteTypeRow.children].forEach(btn => btn.classList.toggle('selected', btn.dataset.type === type));
+    el.voiceRecorder.classList.toggle('hidden', type !== 'voice');
+    el.noteTextInput.placeholder = type === 'voice' ? 'Légende (optionnel)' : "Écris ce que tu as en tête...";
+  }
+
+  el.noteTypeRow.addEventListener('click', (e) => {
+    const btn = e.target.closest('.note-type-btn');
+    if (!btn) return;
+    setNoteType(btn.dataset.type);
+  });
 
   function openNoteAdd() {
     editingNoteId = null;
     el.noteSheetTitle.textContent = 'Nouvelle note';
     el.noteTextInput.value = '';
     el.noteDeleteBtn.classList.add('hidden');
+    el.noteTypeRow.classList.remove('hidden');
+    resetRecorderUI();
+    setNoteType('text');
     openSheet(el.noteSheetBackdrop, el.noteTextInput);
   }
 
   function openNoteEdit(n) {
     editingNoteId = n.id;
     el.noteSheetTitle.textContent = 'Modifier la note';
-    el.noteTextInput.value = n.text;
+    el.noteTextInput.value = n.text || '';
     el.noteDeleteBtn.classList.remove('hidden');
+    el.noteTypeRow.classList.add('hidden');
+    resetRecorderUI();
+    setNoteType(n.type === 'voice' ? 'voice' : 'text');
+    if (n.type === 'voice') {
+      pendingAudioId = n.audioId;
+      el.recordHint.textContent = 'Appuie pour ré-enregistrer';
+      audioGet(n.audioId).then((blob) => {
+        if (!blob) return;
+        el.voicePreview.src = URL.createObjectURL(blob);
+        el.voicePreview.classList.remove('hidden');
+      });
+    }
     openSheet(el.noteSheetBackdrop, el.noteTextInput);
   }
 
-  function saveNote() {
+  async function saveNote() {
     const text = el.noteTextInput.value.trim();
-    if (!text) {
-      el.noteTextInput.focus();
-      return;
-    }
     const now = new Date().toISOString();
 
-    if (editingNoteId) {
-      const n = data.notes.find(x => x.id === editingNoteId);
-      n.text = text;
-      n.updatedAt = now;
+    if (selectedNoteType === 'voice') {
+      if (!recordedBlob && !pendingAudioId) {
+        alert('Enregistre un message vocal avant de sauvegarder.');
+        return;
+      }
+      let audioId = pendingAudioId;
+      let duration = 0;
+      if (recordedBlob) {
+        audioId = editingNoteId ? pendingAudioId || genId() : genId();
+        await audioPut(audioId, recordedBlob);
+        duration = Number(el.recordTimer.textContent.split(':').reduce((acc, v) => acc * 60 + Number(v), 0));
+      }
+
+      if (editingNoteId) {
+        const n = data.notes.find(x => x.id === editingNoteId);
+        n.text = text;
+        n.audioId = audioId;
+        if (recordedBlob) n.duration = duration;
+        n.updatedAt = now;
+      } else {
+        data.notes.push({
+          id: genId(),
+          type: 'voice',
+          text,
+          audioId,
+          duration,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     } else {
-      data.notes.push({
-        id: genId(),
-        text,
-        createdAt: now,
-        updatedAt: now,
-      });
+      if (!text) {
+        el.noteTextInput.focus();
+        return;
+      }
+      if (editingNoteId) {
+        const n = data.notes.find(x => x.id === editingNoteId);
+        n.type = 'text';
+        n.text = text;
+        n.updatedAt = now;
+      } else {
+        data.notes.push({
+          id: genId(),
+          type: 'text',
+          text,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
+
     save();
     renderNotes();
     renderStats();
@@ -474,6 +710,8 @@
   }
 
   function deleteNote() {
+    const n = data.notes.find(x => x.id === editingNoteId);
+    if (n && n.type === 'voice' && n.audioId) audioDelete(n.audioId).catch(() => {});
     data.notes = data.notes.filter(x => x.id !== editingNoteId);
     save();
     renderNotes();
@@ -549,6 +787,72 @@
     el.heatmap.innerHTML = cells.map(c => `<div class="hm-cell hm-${c.level}" title="${c.key}"></div>`).join('');
   }
 
+  // ---------- Reminders ----------
+
+  function computeReminders() {
+    const today = todayKey();
+    const overdueTasks = data.tasks.filter(t => !t.done && t.dueDate && t.dueDate < today).length;
+    const unfinishedRoutines = data.routines.filter(r => !isDoneToday(r)).length;
+    return { overdueTasks, unfinishedRoutines };
+  }
+
+  function reminderMessage({ overdueTasks, unfinishedRoutines }) {
+    const parts = [];
+    if (overdueTasks > 0) parts.push(`${overdueTasks} tâche${overdueTasks > 1 ? 's' : ''} en retard`);
+    if (unfinishedRoutines > 0) parts.push(`${unfinishedRoutines} routine${unfinishedRoutines > 1 ? 's' : ''} pas encore faite${unfinishedRoutines > 1 ? 's' : ''} aujourd'hui`);
+    return parts.length ? `⏰ ${parts.join(' · ')}` : '';
+  }
+
+  let reminderDismissedForSession = false;
+
+  function renderReminderBanner() {
+    if (reminderDismissedForSession) return;
+    const counts = computeReminders();
+    const msg = reminderMessage(counts);
+    if (msg) {
+      el.reminderText.textContent = msg;
+      el.reminderBanner.classList.remove('hidden');
+    } else {
+      el.reminderBanner.classList.add('hidden');
+    }
+  }
+
+  el.reminderDismiss.addEventListener('click', () => {
+    reminderDismissedForSession = true;
+    el.reminderBanner.classList.add('hidden');
+  });
+
+  async function maybeSendNotification() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const counts = computeReminders();
+    const msg = reminderMessage(counts);
+    if (!msg) return;
+    const today = todayKey();
+    if (localStorage.getItem(LAST_NOTIFIED_KEY) === today) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification('Routine', { body: msg.replace('⏰ ', ''), icon: 'icons/icon-192.png' });
+      localStorage.setItem(LAST_NOTIFIED_KEY, today);
+    } catch {}
+  }
+
+  function updateNotifStatus() {
+    if (!('Notification' in window)) {
+      el.notifStatus.textContent = 'Non supporté sur ce navigateur.';
+      el.notifBtn.disabled = true;
+      return;
+    }
+    const status = { granted: 'Activés ✅', denied: 'Refusés — active-les dans les réglages de Safari', default: 'Pas encore activés' };
+    el.notifStatus.textContent = status[Notification.permission] || '';
+  }
+
+  el.notifBtn.addEventListener('click', async () => {
+    if (!('Notification' in window)) return;
+    await Notification.requestPermission();
+    updateNotifStatus();
+    maybeSendNotification();
+  });
+
   // ---------- Sheets ----------
 
   function openSheet(backdrop, focusEl) {
@@ -559,6 +863,7 @@
   function closeSheet(backdrop) {
     backdrop.classList.remove('open');
     document.activeElement && document.activeElement.blur();
+    if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
   }
 
   [el.sheetBackdrop, el.taskSheetBackdrop, el.noteSheetBackdrop, el.settingsSheetBackdrop].forEach(backdrop => {
@@ -593,7 +898,10 @@
 
   // ---------- Settings / backup ----------
 
-  el.settingsBtn.addEventListener('click', () => openSheet(el.settingsSheetBackdrop));
+  el.settingsBtn.addEventListener('click', () => {
+    updateNotifStatus();
+    openSheet(el.settingsSheetBackdrop);
+  });
   el.settingsCloseBtn.addEventListener('click', () => closeSheet(el.settingsSheetBackdrop));
 
   el.exportBtn.addEventListener('click', () => {
@@ -623,6 +931,7 @@
         renderTasks();
         renderNotes();
         renderStats();
+        renderReminderBanner();
         closeSheet(el.settingsSheetBackdrop);
       } catch {
         alert('Fichier de sauvegarde invalide.');
@@ -640,6 +949,7 @@
     renderTasks();
     renderNotes();
     renderStats();
+    renderReminderBanner();
     closeSheet(el.settingsSheetBackdrop);
   });
 
@@ -653,10 +963,20 @@
   renderTasks();
   renderNotes();
   renderStats();
+  renderReminderBanner();
+  updateNotifStatus();
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js').then(() => maybeSendNotification()).catch(() => {});
     });
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      reminderDismissedForSession = false;
+      renderReminderBanner();
+      maybeSendNotification();
+    }
+  });
 })();

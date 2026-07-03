@@ -37,6 +37,10 @@
         <button class="icon-btn" id="settingsBtn" aria-label="Réglages">⚙️</button>
       </div>
     </div>
+    <div class="reminder-banner hidden" id="reminderBanner">
+      <span id="reminderText"></span>
+      <button id="reminderDismiss" aria-label="Fermer">✕</button>
+    </div>
   </header>
 
   <main>
@@ -142,7 +146,19 @@
     <div class="sheet-handle"></div>
     <h2 id="noteSheetTitle">Nouvelle note</h2>
 
+    <div class="note-type-row" id="noteTypeRow">
+      <button class="note-type-btn selected" data-type="text">📝 Texte</button>
+      <button class="note-type-btn" data-type="voice">🎙️ Vocal</button>
+    </div>
+
     <textarea id="noteTextInput" placeholder="Écris ce que tu as en tête..." maxlength="2000" rows="6"></textarea>
+
+    <div class="voice-recorder hidden" id="voiceRecorder">
+      <button class="record-btn" id="recordBtn" aria-label="Enregistrer">🎙️</button>
+      <div class="record-timer" id="recordTimer">00:00</div>
+      <div class="record-hint" id="recordHint">Appuie pour enregistrer</div>
+      <audio class="voice-preview hidden" id="voicePreview" controls></audio>
+    </div>
 
     <div class="sheet-actions">
       <button class="btn btn-danger hidden" id="noteDeleteBtn">Supprimer</button>
@@ -161,6 +177,8 @@
     <p class="settings-hint">Tes données restent uniquement sur cet iPhone. Exporte une sauvegarde régulièrement pour ne rien perdre.</p>
 
     <div class="settings-actions">
+      <button class="btn btn-secondary" id="notifBtn">🔔 Activer les rappels</button>
+      <p class="settings-status" id="notifStatus"></p>
       <button class="btn btn-secondary" id="exportBtn">Exporter une sauvegarde</button>
       <button class="btn btn-secondary" id="importBtn">Importer une sauvegarde</button>
       <input type="file" id="importFile" accept="application/json" class="hidden" />
