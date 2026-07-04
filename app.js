@@ -29,6 +29,8 @@
     emptyRoutines: document.getElementById('emptyRoutines'),
     taskList: document.getElementById('taskList'),
     emptyTasks: document.getElementById('emptyTasks'),
+    agendaGroups: document.getElementById('agendaGroups'),
+    emptyAgenda: document.getElementById('emptyAgenda'),
     noteGrid: document.getElementById('noteGrid'),
     emptyNotes: document.getElementById('emptyNotes'),
     statGrid: document.getElementById('statGrid'),
@@ -51,6 +53,16 @@
     taskSaveBtn: document.getElementById('taskSaveBtn'),
     taskCancelBtn: document.getElementById('taskCancelBtn'),
     taskDeleteBtn: document.getElementById('taskDeleteBtn'),
+
+    apptSheetBackdrop: document.getElementById('apptSheetBackdrop'),
+    apptSheetTitle: document.getElementById('apptSheetTitle'),
+    apptTitleInput: document.getElementById('apptTitleInput'),
+    apptDateInput: document.getElementById('apptDateInput'),
+    apptTimeInput: document.getElementById('apptTimeInput'),
+    apptNoteInput: document.getElementById('apptNoteInput'),
+    apptSaveBtn: document.getElementById('apptSaveBtn'),
+    apptCancelBtn: document.getElementById('apptCancelBtn'),
+    apptDeleteBtn: document.getElementById('apptDeleteBtn'),
 
     noteSheetBackdrop: document.getElementById('noteSheetBackdrop'),
     noteSheetTitle: document.getElementById('noteSheetTitle'),
@@ -81,6 +93,7 @@
   let selectedEmoji = EMOJIS[0];
   let selectedMoment = 'anytime';
   let editingTaskId = null;
+  let editingApptId = null;
   let editingNoteId = null;
   let selectedNoteType = 'text';
   let recordedBlob = null;
@@ -120,6 +133,7 @@
             createdAt: r.createdAt || todayKey(),
           })),
           tasks: [],
+          appointments: [],
           notes: [],
         });
       }
@@ -131,6 +145,7 @@
     return {
       routines: Array.isArray(d.routines) ? d.routines : [],
       tasks: Array.isArray(d.tasks) ? d.tasks : [],
+      appointments: Array.isArray(d.appointments) ? d.appointments : [],
       notes: Array.isArray(d.notes) ? d.notes : [],
     };
   }
@@ -555,6 +570,123 @@
   el.taskDeleteBtn.addEventListener('click', deleteTask);
   el.taskTextInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveTask(); });
 
+  // ---------- Agenda (appointments) ----------
+
+  function formatDateLong(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    const today = todayKey();
+    const tomorrow = todayKey(new Date(Date.now() + 86400000));
+    if (iso === today) return "Aujourd'hui";
+    if (iso === tomorrow) return 'Demain';
+    return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  function renderAppointments() {
+    const appts = [...data.appointments].sort((a, b) => {
+      return a.date.localeCompare(b.date) || (a.time || '99:99').localeCompare(b.time || '99:99');
+    });
+
+    el.agendaGroups.innerHTML = '';
+    el.emptyAgenda.classList.toggle('visible', appts.length === 0);
+
+    const today = todayKey();
+    let currentGroup = null;
+    let ul = null;
+
+    for (const a of appts) {
+      if (a.date !== currentGroup) {
+        currentGroup = a.date;
+        const heading = document.createElement('div');
+        heading.className = 'group-title';
+        heading.textContent = formatDateLong(a.date);
+        el.agendaGroups.appendChild(heading);
+        ul = document.createElement('ul');
+        ul.className = 'agenda-list';
+        el.agendaGroups.appendChild(ul);
+      }
+
+      const past = a.date < today;
+      const li = document.createElement('li');
+      li.className = 'agenda-item' + (past ? ' past' : '');
+      li.innerHTML = `
+        <div class="agenda-time">${a.time || '—'}</div>
+        <div class="agenda-info">
+          <div class="agenda-title">${escapeHtml(a.title)}</div>
+          ${a.note ? `<div class="agenda-note">${escapeHtml(a.note)}</div>` : ''}
+        </div>
+      `;
+      li.addEventListener('click', () => openApptEdit(a));
+      ul.appendChild(li);
+    }
+  }
+
+  function openApptAdd() {
+    editingApptId = null;
+    el.apptSheetTitle.textContent = 'Nouveau rendez-vous';
+    el.apptTitleInput.value = '';
+    el.apptDateInput.value = todayKey();
+    el.apptTimeInput.value = '';
+    el.apptNoteInput.value = '';
+    el.apptDeleteBtn.classList.add('hidden');
+    openSheet(el.apptSheetBackdrop, el.apptTitleInput);
+  }
+
+  function openApptEdit(a) {
+    editingApptId = a.id;
+    el.apptSheetTitle.textContent = 'Modifier le rendez-vous';
+    el.apptTitleInput.value = a.title;
+    el.apptDateInput.value = a.date;
+    el.apptTimeInput.value = a.time || '';
+    el.apptNoteInput.value = a.note || '';
+    el.apptDeleteBtn.classList.remove('hidden');
+    openSheet(el.apptSheetBackdrop, el.apptTitleInput);
+  }
+
+  function saveAppt() {
+    const title = el.apptTitleInput.value.trim();
+    if (!title) {
+      el.apptTitleInput.focus();
+      return;
+    }
+    const date = el.apptDateInput.value || todayKey();
+    const time = el.apptTimeInput.value || null;
+    const note = el.apptNoteInput.value.trim();
+
+    if (editingApptId) {
+      const a = data.appointments.find(x => x.id === editingApptId);
+      a.title = title;
+      a.date = date;
+      a.time = time;
+      a.note = note;
+    } else {
+      data.appointments.push({
+        id: genId(),
+        title,
+        date,
+        time,
+        note,
+        createdAt: todayKey(),
+      });
+    }
+    save();
+    renderAppointments();
+    renderReminderBanner();
+    closeSheet(el.apptSheetBackdrop);
+  }
+
+  function deleteAppt() {
+    data.appointments = data.appointments.filter(x => x.id !== editingApptId);
+    save();
+    renderAppointments();
+    renderReminderBanner();
+    closeSheet(el.apptSheetBackdrop);
+  }
+
+  el.apptSaveBtn.addEventListener('click', saveAppt);
+  el.apptCancelBtn.addEventListener('click', () => closeSheet(el.apptSheetBackdrop));
+  el.apptDeleteBtn.addEventListener('click', deleteAppt);
+  el.apptTitleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveAppt(); });
+
   // ---------- Notes ----------
 
   const noteAudioUrls = new Map();
@@ -793,11 +925,13 @@
     const today = todayKey();
     const overdueTasks = data.tasks.filter(t => !t.done && t.dueDate && t.dueDate < today).length;
     const unfinishedRoutines = data.routines.filter(r => !isDoneToday(r)).length;
-    return { overdueTasks, unfinishedRoutines };
+    const apptsToday = data.appointments.filter(a => a.date === today).length;
+    return { overdueTasks, unfinishedRoutines, apptsToday };
   }
 
-  function reminderMessage({ overdueTasks, unfinishedRoutines }) {
+  function reminderMessage({ overdueTasks, unfinishedRoutines, apptsToday }) {
     const parts = [];
+    if (apptsToday > 0) parts.push(`${apptsToday} rendez-vous aujourd'hui`);
     if (overdueTasks > 0) parts.push(`${overdueTasks} tâche${overdueTasks > 1 ? 's' : ''} en retard`);
     if (unfinishedRoutines > 0) parts.push(`${unfinishedRoutines} routine${unfinishedRoutines > 1 ? 's' : ''} pas encore faite${unfinishedRoutines > 1 ? 's' : ''} aujourd'hui`);
     return parts.length ? `⏰ ${parts.join(' · ')}` : '';
@@ -866,7 +1000,7 @@
     if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
   }
 
-  [el.sheetBackdrop, el.taskSheetBackdrop, el.noteSheetBackdrop, el.settingsSheetBackdrop].forEach(backdrop => {
+  [el.sheetBackdrop, el.taskSheetBackdrop, el.apptSheetBackdrop, el.noteSheetBackdrop, el.settingsSheetBackdrop].forEach(backdrop => {
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) closeSheet(backdrop);
     });
@@ -880,7 +1014,7 @@
     document.getElementById(`view-${view}`).classList.add('active');
     el.tabBtns.forEach(b => b.classList.toggle('active', b.dataset.view === view));
 
-    const titles = { routines: 'Routines', tasks: 'Tâches', notes: 'Notes', stats: 'Stats' };
+    const titles = { routines: 'Routines', tasks: 'Tâches', agenda: 'Agenda', notes: 'Notes', stats: 'Stats' };
     el.viewTitle.textContent = titles[view];
     el.progressRing.style.display = view === 'routines' ? '' : 'none';
     el.addBtn.style.display = view === 'stats' ? 'none' : '';
@@ -893,6 +1027,7 @@
   el.addBtn.addEventListener('click', () => {
     if (currentView === 'routines') openRoutineAdd();
     else if (currentView === 'tasks') openTaskAdd();
+    else if (currentView === 'agenda') openApptAdd();
     else if (currentView === 'notes') openNoteAdd();
   });
 
@@ -929,6 +1064,7 @@
         save();
         renderRoutines();
         renderTasks();
+        renderAppointments();
         renderNotes();
         renderStats();
         renderReminderBanner();
@@ -942,16 +1078,66 @@
   });
 
   el.clearAllBtn.addEventListener('click', () => {
-    if (!confirm('Supprimer définitivement toutes les routines, tâches et notes ?')) return;
+    if (!confirm('Supprimer définitivement toutes les routines, tâches, rendez-vous et notes ?')) return;
     data = normalize({});
     save();
     renderRoutines();
     renderTasks();
+    renderAppointments();
     renderNotes();
     renderStats();
     renderReminderBanner();
     closeSheet(el.settingsSheetBackdrop);
   });
+
+  // ---------- Inbox sync (items added by Claude via the GitHub repo) ----------
+
+  const INBOX_URL = 'https://raw.githubusercontent.com/yvesdartoisiss-sudo/routine-/main/inbox.json';
+  const IMPORTED_INBOX_KEY = 'routine-imported-inbox-ids';
+
+  function applyInboxItem(item) {
+    const now = new Date().toISOString();
+    if (item.kind === 'note') {
+      data.notes.push({ id: genId(), type: 'text', text: item.text || '', createdAt: now, updatedAt: now });
+    } else if (item.kind === 'task') {
+      data.tasks.push({ id: genId(), text: item.text || '', dueDate: item.dueDate || null, done: false, createdAt: todayKey() });
+    } else if (item.kind === 'appointment') {
+      data.appointments.push({ id: genId(), title: item.title || '', date: item.date || todayKey(), time: item.time || null, note: item.note || '', createdAt: todayKey() });
+    } else if (item.kind === 'routine') {
+      data.routines.push({ id: genId(), name: item.name || '', emoji: item.emoji || EMOJIS[0], moment: item.moment || 'anytime', note: item.note || '', completedDates: [], createdAt: todayKey() });
+    }
+  }
+
+  async function syncInbox() {
+    let items;
+    try {
+      const res = await fetch(INBOX_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      items = await res.json();
+    } catch {
+      return;
+    }
+    if (!Array.isArray(items) || !items.length) return;
+
+    const imported = new Set(JSON.parse(localStorage.getItem(IMPORTED_INBOX_KEY) || '[]'));
+    let changed = false;
+    for (const item of items) {
+      if (!item.id || imported.has(item.id)) continue;
+      applyInboxItem(item);
+      imported.add(item.id);
+      changed = true;
+    }
+    if (changed) {
+      localStorage.setItem(IMPORTED_INBOX_KEY, JSON.stringify([...imported]));
+      save();
+      renderRoutines();
+      renderTasks();
+      renderAppointments();
+      renderNotes();
+      renderStats();
+      renderReminderBanner();
+    }
+  }
 
   // ---------- Init ----------
 
@@ -961,10 +1147,12 @@
 
   renderRoutines();
   renderTasks();
+  renderAppointments();
   renderNotes();
   renderStats();
   renderReminderBanner();
   updateNotifStatus();
+  syncInbox();
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -977,6 +1165,7 @@
       reminderDismissedForSession = false;
       renderReminderBanner();
       maybeSendNotification();
+      syncInbox();
     }
   });
 })();

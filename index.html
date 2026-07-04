@@ -60,6 +60,14 @@
       </div>
     </section>
 
+    <section class="view" id="view-agenda">
+      <div class="agenda-groups" id="agendaGroups"></div>
+      <div class="empty-state" id="emptyAgenda">
+        <p>Aucun rendez-vous.</p>
+        <p class="empty-sub">Appuie sur + pour ajouter un rendez-vous.</p>
+      </div>
+    </section>
+
     <section class="view" id="view-notes">
       <div class="note-grid" id="noteGrid"></div>
       <div class="empty-state" id="emptyNotes">
@@ -91,6 +99,7 @@
   <nav class="tabbar">
     <button class="tab-btn active" data-view="routines"><span class="tab-icon">📋</span><span>Routines</span></button>
     <button class="tab-btn" data-view="tasks"><span class="tab-icon">✅</span><span>Tâches</span></button>
+    <button class="tab-btn" data-view="agenda"><span class="tab-icon">🗓️</span><span>Agenda</span></button>
     <button class="tab-btn" data-view="notes"><span class="tab-icon">📝</span><span>Notes</span></button>
     <button class="tab-btn" data-view="stats"><span class="tab-icon">📊</span><span>Stats</span></button>
   </nav>
@@ -136,6 +145,27 @@
       <button class="btn btn-danger hidden" id="taskDeleteBtn">Supprimer</button>
       <button class="btn btn-secondary" id="taskCancelBtn">Annuler</button>
       <button class="btn btn-primary" id="taskSaveBtn">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add / edit appointment modal -->
+<div class="sheet-backdrop" id="apptSheetBackdrop">
+  <div class="sheet" id="apptSheet">
+    <div class="sheet-handle"></div>
+    <h2 id="apptSheetTitle">Nouveau rendez-vous</h2>
+
+    <input type="text" id="apptTitleInput" placeholder="Avec qui / pour quoi ?" maxlength="120" autocomplete="off" />
+    <div class="appt-datetime-row">
+      <input type="date" id="apptDateInput" />
+      <input type="time" id="apptTimeInput" />
+    </div>
+    <textarea id="apptNoteInput" placeholder="Note (optionnel)" maxlength="200" rows="2"></textarea>
+
+    <div class="sheet-actions">
+      <button class="btn btn-danger hidden" id="apptDeleteBtn">Supprimer</button>
+      <button class="btn btn-secondary" id="apptCancelBtn">Annuler</button>
+      <button class="btn btn-primary" id="apptSaveBtn">Enregistrer</button>
     </div>
   </div>
 </div>
