@@ -85,10 +85,25 @@
     importBtn: document.getElementById('importBtn'),
     importFile: document.getElementById('importFile'),
     clearAllBtn: document.getElementById('clearAllBtn'),
+
+    listenMic: document.getElementById('listenMic'),
+    listenMicIcon: document.getElementById('listenMicIcon'),
+    listenStatus: document.getElementById('listenStatus'),
+    listenHint: document.getElementById('listenHint'),
+    assistantBubble: document.getElementById('assistantBubble'),
+    assistantText: document.getElementById('assistantText'),
+    listenLive: document.getElementById('listenLive'),
+    listenLiveText: document.getElementById('listenLiveText'),
+    memorySearch: document.getElementById('memorySearch'),
+    memoryFeed: document.getElementById('memoryFeed'),
+    emptyMemory: document.getElementById('emptyMemory'),
+    ambientToast: document.getElementById('ambientToast'),
+    ambientToastText: document.getElementById('ambientToastText'),
+    ambientToastClose: document.getElementById('ambientToastClose'),
   };
 
   let data = load();
-  let currentView = 'routines';
+  let currentView = 'listen';
   let editingRoutineId = null;
   let selectedEmoji = EMOJIS[0];
   let selectedMoment = 'anytime';
@@ -147,6 +162,7 @@
       tasks: Array.isArray(d.tasks) ? d.tasks : [],
       appointments: Array.isArray(d.appointments) ? d.appointments : [],
       notes: Array.isArray(d.notes) ? d.notes : [],
+      memory: Array.isArray(d.memory) ? d.memory : [],
     };
   }
 
@@ -485,7 +501,7 @@
       li.className = 'task-item' + (t.done ? ' done' : '');
       li.innerHTML = `
         <div class="task-info">
-          <div class="task-text">${escapeHtml(t.text)}</div>
+          <div class="task-text">${escapeHtml(t.text)}${t.auto ? '<span class="auto-tag">🎧 capté</span>' : ''}</div>
           ${t.dueDate ? `<div class="task-due" style="${overdue ? 'color:var(--danger)' : ''}">📅 ${formatDateShort(t.dueDate)}${overdue ? ' · en retard' : ''}</div>` : ''}
         </div>
         <button class="check" aria-label="Marquer comme fait">
@@ -611,7 +627,7 @@
       li.innerHTML = `
         <div class="agenda-time">${a.time || '—'}</div>
         <div class="agenda-info">
-          <div class="agenda-title">${escapeHtml(a.title)}</div>
+          <div class="agenda-title">${escapeHtml(a.title)}${a.auto ? '<span class="auto-tag">🎧 capté</span>' : ''}</div>
           ${a.note ? `<div class="agenda-note">${escapeHtml(a.note)}</div>` : ''}
         </div>
       `;
@@ -1014,10 +1030,10 @@
     document.getElementById(`view-${view}`).classList.add('active');
     el.tabBtns.forEach(b => b.classList.toggle('active', b.dataset.view === view));
 
-    const titles = { routines: 'Routines', tasks: 'Tâches', agenda: 'Agenda', notes: 'Notes', stats: 'Stats' };
+    const titles = { listen: 'Écoute', routines: 'Routines', tasks: 'Tâches', agenda: 'Agenda', notes: 'Notes', stats: 'Stats' };
     el.viewTitle.textContent = titles[view];
     el.progressRing.style.display = view === 'routines' ? '' : 'none';
-    el.addBtn.style.display = view === 'stats' ? 'none' : '';
+    el.addBtn.style.display = (view === 'stats' || view === 'listen') ? 'none' : '';
   }
 
   el.tabBtns.forEach(btn => {
@@ -1067,6 +1083,7 @@
         renderAppointments();
         renderNotes();
         renderStats();
+        renderMemory();
         renderReminderBanner();
         closeSheet(el.settingsSheetBackdrop);
       } catch {
@@ -1078,7 +1095,7 @@
   });
 
   el.clearAllBtn.addEventListener('click', () => {
-    if (!confirm('Supprimer définitivement toutes les routines, tâches, rendez-vous et notes ?')) return;
+    if (!confirm('Supprimer définitivement toutes les routines, tâches, rendez-vous, notes et la mémoire ?')) return;
     data = normalize({});
     save();
     renderRoutines();
@@ -1086,6 +1103,7 @@
     renderAppointments();
     renderNotes();
     renderStats();
+    renderMemory();
     renderReminderBanner();
     closeSheet(el.settingsSheetBackdrop);
   });
@@ -1139,11 +1157,414 @@
     }
   }
 
+  // ---------- Écoute : agent vocal ----------
+  //
+  // Fonctionne pendant que l'app est ouverte au premier plan (écran allumé).
+  // iOS/Safari ne permet PAS d'enregistrer en continu en arrière-plan ou
+  // téléphone verrouillé : c'est une limite du système, pas de l'app.
+  // La reconnaissance vocale marche le mieux sur Chrome/Android.
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  let listening = false;
+  let wantListening = false;   // intention de l'utilisateur (pour relancer)
+  let wakeLock = null;
+  let lastAmbientAt = 0;
+  let lastAmbientKey = '';
+
+  function normalizeText(s) {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  // ----- Synthèse vocale (réponses courtes) -----
+
+  function speak(text) {
+    try {
+      if (!('speechSynthesis' in window) || !text) return;
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'fr-FR';
+      u.rate = 1.05;
+      speechSynthesis.speak(u);
+    } catch {}
+  }
+
+  // ----- Analyse date / heure en français -----
+
+  const WEEKDAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+
+  function parseDateFromText(n) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (/\baujourd'?hui\b|\baujourdhui\b/.test(n)) return todayKey(today);
+    if (/\bapres[- ]demain\b/.test(n)) { const d = new Date(today); d.setDate(d.getDate() + 2); return todayKey(d); }
+    if (/\bdemain\b/.test(n)) { const d = new Date(today); d.setDate(d.getDate() + 1); return todayKey(d); }
+
+    for (let i = 0; i < WEEKDAYS.length; i++) {
+      const re = new RegExp('\\b' + WEEKDAYS[i] + '\\b');
+      if (re.test(n)) {
+        const d = new Date(today);
+        let delta = (i - d.getDay() + 7) % 7;
+        if (delta === 0) delta = 7;                 // "lundi" quand on est lundi = le prochain
+        if (/\bprochain\b/.test(n) && delta < 4) delta += 7; // "prochain" pousse d'une semaine
+        d.setDate(d.getDate() + delta);
+        return todayKey(d);
+      }
+    }
+    // jj/mm ou "le 25"
+    const dm = n.match(/\b(\d{1,2})[\/](\d{1,2})\b/);
+    if (dm) {
+      const d = new Date(today.getFullYear(), Number(dm[2]) - 1, Number(dm[1]));
+      if (!isNaN(d)) return todayKey(d);
+    }
+    return null;
+  }
+
+  function parseTimeFromText(n) {
+    if (/\bmidi\b/.test(n)) return '12:00';
+    if (/\bminuit\b/.test(n)) return '00:00';
+    let m = n.match(/\b(\d{1,2})\s*h(?:eures?)?\s*(\d{2})?\b/);
+    if (m) {
+      let h = Number(m[1]); const min = m[2] ? Number(m[2]) : 0;
+      if (h >= 0 && h < 24 && min < 60) return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+    }
+    m = n.match(/\ba\s+(\d{1,2})\s+heures?\b/);
+    if (m) { const h = Number(m[1]); if (h < 24) return String(h).padStart(2, '0') + ':00'; }
+    return null;
+  }
+
+  function dateLabel(iso) {
+    return formatDateLong(iso); // "Aujourd'hui" / "Demain" / "samedi 25 juillet"
+  }
+
+  // ----- Mémoire (tout ce qui est capté) -----
+
+  function pushMemory(text, kind) {
+    data.memory.push({ id: genId(), text, ts: new Date().toISOString(), kind: kind || 'heard' });
+    if (data.memory.length > 4000) data.memory = data.memory.slice(-4000);
+    save();
+    renderMemory();
+  }
+
+  function renderMemory() {
+    const q = normalizeText(el.memorySearch ? el.memorySearch.value : '');
+    let items = [...data.memory].reverse();
+    if (q) items = items.filter(m => normalizeText(m.text).includes(q));
+    items = items.slice(0, 60);
+
+    el.emptyMemory.classList.toggle('visible', data.memory.length === 0);
+    el.memoryFeed.innerHTML = items.map(m => {
+      const d = new Date(m.ts);
+      const when = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' · ' +
+        d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const badge = m.kind === 'question'
+        ? '<span class="memory-badge">❓ question</span>'
+        : m.kind === 'answer'
+        ? '<span class="memory-badge appt">🤖 réponse</span>'
+        : '';
+      return `<div class="memory-item ${m.kind === 'question' ? 'q' : ''}">
+        <div class="memory-item-text">${escapeHtml(m.text)}</div>
+        <div class="memory-item-meta"><span>${when}</span>${badge}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ----- Extraction automatique (rendez-vous / tâches) -----
+
+  function cleanCapture(text) {
+    return text.length > 90 ? text.slice(0, 88) + '…' : text;
+  }
+
+  function autoExtract(text) {
+    const n = normalizeText(text);
+    const date = parseDateFromText(n);
+    const time = parseTimeFromText(n);
+
+    const apptTrigger = /\b(rendez[- ]?vous|rdv|reunion|rencontre|consultation|on se voit|on se retrouve|au medecin|au dentiste)\b/.test(n);
+    const taskTrigger = /\b(n'?oublie pas|noublie pas|il faut que|faut que|il faut|penser a|pense a|rappelle[- ]?moi|rappelle moi|achete|acheter|reserve|reserver|envoie|envoyer|appelle|appeler|prendre rendez)\b/.test(n);
+
+    if (apptTrigger && date) {
+      data.appointments.push({
+        id: genId(), title: cleanCapture(text), date, time: time || null,
+        note: '', auto: true, createdAt: todayKey(),
+      });
+      save(); renderAppointments(); renderReminderBanner();
+      showAmbientToast('🗓️ Capté : ' + dateLabel(date) + (time ? ' à ' + time : ''), false);
+      return true;
+    }
+    if (taskTrigger) {
+      data.tasks.push({
+        id: genId(), text: cleanCapture(text), dueDate: date || null,
+        done: false, auto: true, createdAt: todayKey(),
+      });
+      save(); renderTasks(); renderStats(); renderReminderBanner();
+      showAmbientToast('✅ Tâche captée' + (date ? ' · ' + dateLabel(date) : ''), false);
+      return true;
+    }
+    return false;
+  }
+
+  // ----- Rappels contextuels courts -----
+
+  function ambientCheck(text) {
+    const n = normalizeText(text);
+    const now = Date.now();
+
+    if (/\b(magasin|courses|supermarche|carrefour|leclerc|lidl|auchan|intermarche|drive|epicerie)\b/.test(n)) {
+      if (lastAmbientKey === 'shop' && now - lastAmbientAt < 120000) return;
+      const shopping = data.tasks.filter(t => !t.done &&
+        /\b(achet|acheter|prendre|lait|pain|courses|pharmacie)\b/.test(normalizeText(t.text)));
+      if (shopping.length) {
+        const msg = 'Pense à : ' + shopping.slice(0, 3).map(t => t.text.replace(/^.*?(achet\w*|prendre)\s*/i, '')).join(', ');
+        lastAmbientAt = now; lastAmbientKey = 'shop';
+        showAmbientToast('💡 ' + msg, true);
+      }
+    }
+  }
+
+  function showAmbientToast(msg, doSpeak) {
+    el.ambientToastText.textContent = msg.replace(/^💡\s*/, '');
+    el.ambientToast.classList.remove('hidden');
+    if (doSpeak) speak(msg.replace(/^💡\s*/, ''));
+    clearTimeout(showAmbientToast._t);
+    showAmbientToast._t = setTimeout(() => el.ambientToast.classList.add('hidden'), 9000);
+  }
+  el.ambientToastClose.addEventListener('click', () => el.ambientToast.classList.add('hidden'));
+
+  // ----- Moteur de réponse (mot-clé « Claude » + recherche) -----
+
+  const WEATHER_CODES = {
+    0: 'ciel dégagé', 1: 'plutôt dégagé', 2: 'partiellement nuageux', 3: 'nuageux',
+    45: 'brouillard', 48: 'brouillard givrant', 51: 'bruine', 53: 'bruine', 55: 'bruine',
+    61: 'pluie faible', 63: 'pluie', 65: 'forte pluie', 71: 'neige', 73: 'neige', 75: 'forte neige',
+    80: 'averses', 81: 'averses', 82: 'fortes averses', 95: 'orage', 96: 'orage', 99: 'orage',
+  };
+
+  function getPosition() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject();
+      navigator.geolocation.getCurrentPosition(
+        p => resolve(p.coords), () => reject(), { timeout: 8000, maximumAge: 3600000 });
+    });
+  }
+
+  async function weatherAnswer(n) {
+    let coords;
+    try { coords = await getPosition(); }
+    catch { return "Je n'ai pas ta position pour la météo. Active la localisation."; }
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.latitude}&longitude=${coords.longitude}` +
+        `&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto`;
+      const res = await fetch(url);
+      const j = await res.json();
+      const idx = /\bdemain\b/.test(n) ? 1 : 0;
+      const day = idx === 1 ? 'Demain' : "Aujourd'hui";
+      const tmax = Math.round(j.daily.temperature_2m_max[idx]);
+      const tmin = Math.round(j.daily.temperature_2m_min[idx]);
+      const desc = WEATHER_CODES[j.daily.weathercode[idx]] || '';
+      return `${day} : ${tmax}°, ${desc} (min ${tmin}°).`;
+    } catch {
+      return "Impossible de récupérer la météo.";
+    }
+  }
+
+  function recapAnswer() {
+    const today = todayKey();
+    const appts = data.appointments.filter(a => a.date === today)
+      .sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+    const tasks = data.tasks.filter(t => !t.done && (!t.dueDate || t.dueDate <= today));
+    const routinesLeft = data.routines.filter(r => !isDoneToday(r)).length;
+
+    const parts = [];
+    if (appts.length) parts.push(appts.map(a => a.title + (a.time ? ' à ' + a.time : '')).join(', '));
+    else parts.push('aucun rendez-vous');
+    if (tasks.length) parts.push(tasks.length + ' tâche' + (tasks.length > 1 ? 's' : '') + ' à faire');
+    if (routinesLeft) parts.push(routinesLeft + ' routine' + (routinesLeft > 1 ? 's' : '') + ' à cocher');
+    return { reply: "Aujourd'hui : " + parts.join(' · ') + '.' };
+  }
+
+  function dateAnswer(date, original) {
+    const appts = data.appointments.filter(a => a.date === date)
+      .sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+    const tasks = data.tasks.filter(t => !t.done && t.dueDate === date);
+    const label = dateLabel(date);
+
+    if (!appts.length && !tasks.length) {
+      // rien en agenda : on cherche dans la mémoire
+      const mem = searchMemory(original);
+      if (mem.length) return { reply: label + ', rien en agenda. Mais tu avais dit : « ' + mem[0].text + ' ».' };
+      return { reply: label + ' : rien de prévu.' };
+    }
+    const bits = [];
+    if (appts.length) bits.push(appts.map(a => a.title + (a.time ? ' à ' + a.time : '')).join(', '));
+    if (tasks.length) bits.push(tasks.map(t => t.text).join(', '));
+    return { reply: label + ' : ' + bits.join(' · ') + '.' };
+  }
+
+  function searchMemory(q) {
+    const stop = new Set(['claude', 'quand', 'quel', 'quelle', 'quels', 'quelles', 'est', 'ce', 'que', 'qu',
+      'le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'a', 'as', 'ai', 'tu', 'je', 'on', 'pour', 'avec',
+      'qui', 'quoi', 'ou', 'dis', 'moi', 'faut', 'il', 'me', 'mon', 'ma', 'mes', 'prevu', 'cherche', 'trouve']);
+    const tokens = normalizeText(q).split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.has(w));
+    if (!tokens.length) return [];
+    const scored = data.memory.map(m => {
+      const mn = normalizeText(m.text);
+      let score = 0;
+      for (const t of tokens) if (mn.includes(t)) score++;
+      return { m, score };
+    }).filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.m.ts.localeCompare(a.m.ts));
+    return scored.slice(0, 3).map(x => x.m);
+  }
+
+  function searchAnswer(q) {
+    const found = searchMemory(q);
+    if (!found.length) return { reply: "Je n'ai rien trouvé là-dessus dans ce que tu as enregistré." };
+    if (found.length === 1) return { reply: 'Tu avais dit : « ' + found[0].text + ' ».' };
+    return { reply: found.map((m, i) => (i + 1) + '. ' + m.text).join('\n') };
+  }
+
+  async function answerQuery(q) {
+    const n = normalizeText(q);
+    if (/\b(meteo|temps qu'il|temps qu il|il fera|il va faire|pluie|degres)\b/.test(n)) {
+      return { reply: await weatherAnswer(n) };
+    }
+    if (/(on en est ou|ma journee|resume|recap|quoi de prevu|quoi aujourd|programme du jour|ma journ)/.test(n)) {
+      return recapAnswer();
+    }
+    const date = parseDateFromText(n);
+    if (date) return dateAnswer(date, q);
+    return searchAnswer(q);
+  }
+
+  // ----- Traitement d'un énoncé -----
+
+  const WAKE = /\b(claude|cloud|clode)\b/;
+
+  async function handleUtterance(text) {
+    const n = normalizeText(text);
+    if (WAKE.test(n)) {
+      // Commande adressée à l'assistant
+      const command = text.replace(/^[^a-zA-Zéèàù]*/, '').replace(new RegExp(WAKE.source, 'i'), '').replace(/^[\s,\.]+/, '').trim() || text;
+      pushMemory(text, 'question');
+      const { reply } = await answerQuery(command);
+      showAssistant(reply);
+      pushMemory(reply, 'answer');
+      speak(reply);
+      return;
+    }
+    // Écoute passive : on enregistre tout, on extrait, on rappelle si utile
+    pushMemory(text, 'heard');
+    autoExtract(text);
+    ambientCheck(text);
+  }
+
+  function showAssistant(text) {
+    el.assistantText.textContent = text;
+    el.assistantBubble.classList.remove('hidden');
+  }
+
+  // ----- Contrôle micro -----
+
+  async function acquireWakeLock() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+  }
+  async function releaseWakeLock() {
+    try { if (wakeLock) { await wakeLock.release(); wakeLock = null; } } catch {}
+  }
+
+  function setListenUI(on) {
+    el.listenMic.classList.toggle('active', on);
+    el.listenMicIcon.textContent = on ? '🎙️' : '🎧';
+    el.listenStatus.textContent = on ? 'À l\'écoute…' : 'Écoute désactivée';
+    el.listenStatus.classList.toggle('on', on);
+    el.listenLive.classList.toggle('hidden', !on);
+    if (!on) el.listenLiveText.textContent = '';
+    el.listenHint.textContent = on
+      ? 'Tout est enregistré. Dis « Claude, … » pour une vraie question.'
+      : 'Appuie pour activer. Dis « Claude… » pour poser une question.';
+  }
+
+  function startListening() {
+    if (!SR) {
+      alert("La reconnaissance vocale n'est pas disponible sur ce navigateur.\n\nÀ installer plutôt via Chrome (Android) ou Chrome/Edge sur ordinateur. Sur iPhone, le support Safari est limité.");
+      return;
+    }
+    if (!recognition) {
+      recognition = new SR();
+      recognition.lang = 'fr-FR';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const r = e.results[i];
+          if (r.isFinal) {
+            const t = (r[0].transcript || '').trim();
+            if (t) handleUtterance(t);
+          } else {
+            interim += r[0].transcript;
+          }
+        }
+        el.listenLiveText.textContent = interim;
+      };
+      recognition.onerror = (e) => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          wantListening = false; listening = false; setListenUI(false); releaseWakeLock();
+          alert("Accès au micro refusé. Autorise-le dans les réglages du navigateur.");
+        }
+        // 'no-speech' / 'network' / 'aborted' : on laisse onend relancer
+      };
+      recognition.onend = () => {
+        listening = false;
+        if (wantListening) {
+          try { recognition.start(); listening = true; } catch {}
+        } else {
+          setListenUI(false);
+        }
+      };
+    }
+    wantListening = true;
+    try { recognition.start(); listening = true; setListenUI(true); acquireWakeLock(); }
+    catch {}
+  }
+
+  function stopListening() {
+    wantListening = false;
+    listening = false;
+    try { recognition && recognition.stop(); } catch {}
+    setListenUI(false);
+    releaseWakeLock();
+  }
+
+  el.listenMic.addEventListener('click', () => {
+    if (wantListening) stopListening(); else startListening();
+  });
+
+  // Recherche / question par le champ texte
+  el.memorySearch.addEventListener('input', renderMemory);
+  el.memorySearch.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const q = el.memorySearch.value.trim();
+    if (!q) return;
+    const { reply } = await answerQuery(q);
+    showAssistant(reply);
+  });
+
+  // Ré-acquérir le wakeLock si l'app revient au premier plan
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && wantListening) acquireWakeLock();
+  });
+
   // ---------- Init ----------
 
   el.todayLabel.textContent = new Date().toLocaleDateString('fr-FR', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
+
+  renderMemory();
 
   renderRoutines();
   renderTasks();

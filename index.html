@@ -44,7 +44,39 @@
   </header>
 
   <main>
-    <section class="view active" id="view-routines">
+    <section class="view active" id="view-listen">
+      <div class="listen-hero">
+        <button class="listen-mic" id="listenMic" aria-label="Activer l'écoute">
+          <span class="listen-mic-icon" id="listenMicIcon">🎧</span>
+          <span class="listen-pulse"></span>
+        </button>
+        <div class="listen-status" id="listenStatus">Écoute désactivée</div>
+        <div class="listen-hint" id="listenHint">Appuie pour activer. Dis « Claude… » pour poser une question.</div>
+      </div>
+
+      <div class="assistant-bubble hidden" id="assistantBubble">
+        <div class="assistant-avatar">🤖</div>
+        <div class="assistant-text" id="assistantText"></div>
+      </div>
+
+      <div class="listen-live hidden" id="listenLive">
+        <span class="listen-live-dot"></span>
+        <span class="listen-live-text" id="listenLiveText"></span>
+      </div>
+
+      <div class="search-box">
+        <span class="search-icon">🔎</span>
+        <input type="search" id="memorySearch" placeholder="Rechercher / demander (ex : samedi prochain ?)" autocomplete="off" />
+      </div>
+
+      <div class="memory-feed" id="memoryFeed"></div>
+      <div class="empty-state" id="emptyMemory">
+        <p>Rien n'a encore été capté.</p>
+        <p class="empty-sub">Active l'écoute pour tout enregistrer automatiquement.</p>
+      </div>
+    </section>
+
+    <section class="view" id="view-routines">
       <div class="routine-groups" id="routineGroups"></div>
       <div class="empty-state" id="emptyRoutines">
         <p>Aucune routine pour l'instant.</p>
@@ -96,8 +128,15 @@
 
   <button class="fab" id="addBtn" aria-label="Ajouter">+</button>
 
+  <div class="ambient-toast hidden" id="ambientToast">
+    <span class="ambient-toast-icon">💡</span>
+    <span class="ambient-toast-text" id="ambientToastText"></span>
+    <button class="ambient-toast-close" id="ambientToastClose" aria-label="Fermer">✕</button>
+  </div>
+
   <nav class="tabbar">
-    <button class="tab-btn active" data-view="routines"><span class="tab-icon">📋</span><span>Routines</span></button>
+    <button class="tab-btn active" data-view="listen"><span class="tab-icon">🎧</span><span>Écoute</span></button>
+    <button class="tab-btn" data-view="routines"><span class="tab-icon">📋</span><span>Routines</span></button>
     <button class="tab-btn" data-view="tasks"><span class="tab-icon">✅</span><span>Tâches</span></button>
     <button class="tab-btn" data-view="agenda"><span class="tab-icon">🗓️</span><span>Agenda</span></button>
     <button class="tab-btn" data-view="notes"><span class="tab-icon">📝</span><span>Notes</span></button>
